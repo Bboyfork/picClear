@@ -56,6 +56,16 @@ final class PhotoLibraryManager: ObservableObject {
         loadAlbums()
     }
 
+    /// 删除相册及其中全部照片
+    func deleteAlbum(_ info: AlbumInfo) async throws {
+        try await PHPhotoLibrary.shared().performChanges {
+            let assets = PHAsset.fetchAssets(in: info.collection, options: nil)
+            PHAssetChangeRequest.deleteAssets(assets)
+            PHAssetCollectionChangeRequest.deleteAssetCollections([info.collection] as NSArray)
+        }
+        loadAlbums()
+    }
+
     func album(withID id: String) -> AlbumInfo? {
         albums.first { $0.id == id }
     }

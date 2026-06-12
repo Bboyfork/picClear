@@ -90,7 +90,6 @@ struct SwipeView: View {
                         .offset(dragOffset)
                         .rotationEffect(.degrees(Double(dragOffset.width) / 18))
                         .gesture(dragGesture)
-                        .animation(.spring(response: 0.35, dampingFraction: 0.75), value: dragOffset)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -154,7 +153,9 @@ struct SwipeView: View {
                 } else if t.height < -swipeThreshold {
                     perform(.like)
                 } else {
-                    dragOffset = .zero
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        dragOffset = .zero
+                    }
                 }
             }
     }
@@ -165,31 +166,49 @@ struct SwipeView: View {
         let asset = assets[currentIndex]
         isFlyingOut = true
 
-        // 卡片飞出方向
-        switch action {
-        case .delete: dragOffset = CGSize(width: -700, height: 0)
-        case .keep: dragOffset = CGSize(width: 700, height: 0)
-        case .like: dragOffset = CGSize(width: 0, height: -900)
+        // 卡片飞出
+        withAnimation(.easeOut(duration: 0.3)) {
+            switch action {
+            case .delete: dragOffset = CGSize(width: -700, height: 0)
+            case .keep: dragOffset = CGSize(width: 700, height: 0)
+            case .like: dragOffset = CGSize(width: 0, height: -900)
+            }
         }
 
         Task {
             do {
+                // 右滑去向：设置了且不是源相册才需要移动
+                let keepTarget = settings.keepAlbumID
+                let needsKeepCopy = !keepTarget.isEmpty && keepTarget != settings.sourceAlbumID
+
                 switch action {
                 case .delete:
                     try await library.add(asset, toAlbumID: settings.deleteAlbumID)
                     processedCount.deleted += 1
+                case .keep:
+                    if needsKeepCopy {
+                        try await library.add(asset, toAlbumID: keepTarget)
+                    }
+                    processedCount.kept += 1
                 case .like:
+                    // 喜欢 = 保留逻辑 + 额外存入喜欢相册
+                    if needsKeepCopy {
+                        try await library.add(asset, toAlbumID: keepTarget)
+                    }
                     try await library.add(asset, toAlbumID: settings.likeAlbumID)
                     processedCount.liked += 1
-                case .keep:
-                    processedCount.kept += 1
                 }
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await Task.sleep(for: .milliseconds(300))
                 currentIndex += 1
             } catch {
                 errorMessage = error.localizedDescription
             }
-            dragOffset = .zero
+            // 不带动画归零，避免新卡片出现"飞回来"的视觉
+            var tx = Transaction()
+            tx.disablesAnimations = true
+            withTransaction(tx) {
+                dragOffset = .zero
+            }
             isFlyingOut = false
         }
     }

@@ -12,6 +12,8 @@ struct SettingsView: View {
     @State private var showNewAlbumDialog = false
     @State private var newAlbumName = ""
     @State private var errorMessage: String?
+    @State private var albumPendingDelete: AlbumInfo?
+    @State private var showHelp = false
 
     var body: some View {
         NavigationStack {
@@ -36,28 +38,46 @@ struct SettingsView: View {
 
     private var settingsList: some View {
         List {
-            Section("整理设置") {
+            Section {
                 albumPicker(
                     title: "要处理的相册",
                     icon: "photo.stack",
                     color: .blue,
                     selection: $settings.sourceAlbumID,
-                    allowWholeLibrary: true
+                    emptyLabel: "整个图库"
                 )
                 albumPicker(
                     title: "删除相册（左滑去向）",
                     icon: "trash",
                     color: .red,
                     selection: $settings.deleteAlbumID,
-                    allowWholeLibrary: false
+                    emptyLabel: "未设置"
+                )
+                albumPicker(
+                    title: "右滑去向",
+                    icon: "checkmark.circle",
+                    color: .green,
+                    selection: $settings.keepAlbumID,
+                    emptyLabel: "原相册（不移动）"
                 )
                 albumPicker(
                     title: "喜欢相册（上滑去向）",
                     icon: "heart",
                     color: .pink,
                     selection: $settings.likeAlbumID,
-                    allowWholeLibrary: false
+                    emptyLabel: "未设置"
                 )
+            } header: {
+                HStack {
+                    Text("整理设置")
+                    Button {
+                        showHelp = true
+                    } label: {
+                        Image(systemName: "questionmark.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tint)
+                }
             }
 
             Section {
@@ -70,6 +90,13 @@ struct SettingsView: View {
                         Text("\(album.count)")
                             .foregroundStyle(.secondary)
                             .font(.footnote.monospacedDigit())
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            albumPendingDelete = album
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
                     }
                 }
             } header: {
@@ -87,10 +114,23 @@ struct SettingsView: View {
             }
         }
         .refreshable { library.loadAlbums() }
+        .sheet(isPresented: $showHelp) { HelpSheet() }
         .alert("新建相册", isPresented: $showNewAlbumDialog) {
             TextField("相册名称", text: $newAlbumName)
             Button("创建") { createAlbum() }
             Button("取消", role: .cancel) {}
+        }
+        .alert(
+            "删除「\(albumPendingDelete?.title ?? "")」？",
+            isPresented: .init(
+                get: { albumPendingDelete != nil },
+                set: { if !$0 { albumPendingDelete = nil } }
+            )
+        ) {
+            Button("是 全部删除", role: .destructive) { deletePendingAlbum() }
+            Button("算了 留着", role: .cancel) {}
+        } message: {
+            Text("相册和相册内的全部照片（\(albumPendingDelete?.count ?? 0) 张）都会删除，请谨慎操作")
         }
         .alert("出错了", isPresented: .init(
             get: { errorMessage != nil },
@@ -107,14 +147,10 @@ struct SettingsView: View {
         icon: String,
         color: Color,
         selection: Binding<String>,
-        allowWholeLibrary: Bool
+        emptyLabel: String
     ) -> some View {
         Picker(selection: selection) {
-            if allowWholeLibrary {
-                Text("整个图库").tag("")
-            } else {
-                Text("未设置").tag("")
-            }
+            Text(emptyLabel).tag("")
             ForEach(library.albums) { album in
                 Text(album.title).tag(album.id)
             }
@@ -139,5 +175,77 @@ struct SettingsView: View {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func deletePendingAlbum() {
+        guard let album = albumPendingDelete else { return }
+        albumPendingDelete = nil
+        Task {
+            do {
+                try await library.deleteAlbum(album)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+}
+
+// MARK: - 帮助说明
+
+private struct HelpSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                helpRow(
+                    icon: "arrow.left.circle.fill", color: .red,
+                    title: "左滑 · 删除",
+                    detail: "照片移入「删除相册」做标记，原图仍在图库。整理完去该相册一次性彻底删除，安全不误删。"
+                )
+                helpRow(
+                    icon: "arrow.right.circle.fill", color: .green,
+                    title: "右滑 · 保留",
+                    detail: "默认原地不动；若设置了「右滑去向」，照片会同时存入该相册。"
+                )
+                helpRow(
+                    icon: "arrow.up.circle.fill", color: .pink,
+                    title: "上滑 · 喜欢",
+                    detail: "在「保留」的基础上，额外存一份到「喜欢相册」。"
+                )
+                helpRow(
+                    icon: "photo.stack", color: .blue,
+                    title: "要处理的相册",
+                    detail: "整理的照片来源，可选某个相册或整个图库。"
+                )
+            }
+            .navigationTitle("滑动整理说明")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("知道了") { dismiss() }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 420, minHeight: 380)
+        #endif
+    }
+
+    private func helpRow(icon: String, color: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
