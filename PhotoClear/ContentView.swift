@@ -2,20 +2,34 @@
 //  ContentView.swift
 //  PhotoClear
 //
-//  Created by fork Tian on 12/06/2026.
-//
 
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var library = PhotoLibraryManager()
+    @StateObject private var settings = AppSettings()
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        TabView {
+            Tab("首页", systemImage: "rectangle.stack.badge.play") {
+                SwipeView()
+            }
+            Tab("设置", systemImage: "gearshape") {
+                SettingsView()
+            }
+            Tab("我的", systemImage: "person.crop.circle") {
+                ProfileView()
+            }
         }
-        .padding()
+        .environmentObject(library)
+        .environmentObject(settings)
+        .task {
+            if library.isAuthorized {
+                library.loadAlbums()
+            } else {
+                await library.requestPermission()
+            }
+        }
     }
 }
 
