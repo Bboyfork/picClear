@@ -26,15 +26,23 @@ extension Image {
 struct AssetImageView: View {
     let asset: PHAsset
     var targetSize = CGSize(width: 800, height: 800)
+    /// true = 裁满填充（卡片/网格），false = 完整显示（看全貌）
+    var fillMode = true
 
     @State private var image: PlatformImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(platformImage: image)
-                    .resizable()
-                    .scaledToFill()
+                if fillMode {
+                    Image(platformImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(platformImage: image)
+                        .resizable()
+                        .scaledToFit()
+                }
             } else {
                 Rectangle()
                     .fill(.quaternary)

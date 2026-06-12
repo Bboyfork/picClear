@@ -25,11 +25,13 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("设置")
-        }
-        .task {
-            if library.isAuthorized && library.albums.isEmpty {
-                library.loadAlbums()
+            .navigationDestination(for: AlbumInfo.self) { album in
+                AlbumDetailView(album: album)
             }
+        }
+        .onAppear {
+            // 每次切到设置页都刷新相册列表
+            if library.isAuthorized { library.loadAlbums() }
         }
         .onChange(of: library.authorizationStatus) {
             if library.isAuthorized { library.loadAlbums() }
@@ -82,14 +84,16 @@ struct SettingsView: View {
 
             Section {
                 ForEach(library.albums) { album in
-                    HStack {
-                        Image(systemName: "rectangle.stack")
-                            .foregroundStyle(.secondary)
-                        Text(album.title)
-                        Spacer()
-                        Text("\(album.count)")
-                            .foregroundStyle(.secondary)
-                            .font(.footnote.monospacedDigit())
+                    NavigationLink(value: album) {
+                        HStack {
+                            Image(systemName: "rectangle.stack")
+                                .foregroundStyle(.secondary)
+                            Text(album.title)
+                            Spacer()
+                            Text("\(album.count)")
+                                .foregroundStyle(.secondary)
+                                .font(.footnote.monospacedDigit())
+                        }
                     }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {

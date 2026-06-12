@@ -21,10 +21,24 @@ struct SwipeView: View {
     @State private var currentIndex = 0
     @State private var dragOffset: CGSize = .zero
     @State private var isFlyingOut = false
+    @State private var isZoomed = false
     @State private var errorMessage: String?
     @State private var processedCount = (deleted: 0, kept: 0, liked: 0)
 
     private let swipeThreshold: CGFloat = 110
+
+    /// 按"时钟方向"划分滑动区域：10点~2点=上滑喜欢，2点~6点=右滑保留，6点~10点=左滑删除
+    private func swipeDirection(_ t: CGSize, threshold: CGFloat) -> SwipeAction? {
+        let distance = (t.width * t.width + t.height * t.height).squareRoot()
+        guard distance > threshold else { return nil }
+        // 屏幕坐标 y 向下：3点=0°，6点=90°，9点=±180°，12点=-90°
+        let angle = atan2(t.height, t.width) * 180 / .pi
+        switch angle {
+        case -150 ..< -30: return .like    // 10点 ~ 2点
+        case -30 ..< 90: return .keep      // 2点 ~ 6点
+        default: return .delete            // 6点 ~ 10点
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -67,6 +81,28 @@ struct SwipeView: View {
         .onChange(of: library.authorizationStatus) {
             if library.isAuthorized { reload() }
         }
+        .overlay {
+            if isZoomed, currentIndex < assets.count {
+                zoomOverlay
+            }
+        }
+    }
+
+    /// 全貌查看：单击退出，期间不可滑动
+    private var zoomOverlay: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            AssetImageView(
+                asset: assets[currentIndex],
+                targetSize: CGSize(width: 2400, height: 2400),
+                fillMode: false
+            )
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.2)) { isZoomed = false }
+        }
+        .transition(.opacity)
     }
 
     // MARK: - 卡片堆
@@ -89,6 +125,9 @@ struct SwipeView: View {
                         .overlay(swipeLabel)
                         .offset(dragOffset)
                         .rotationEffect(.degrees(Double(dragOffset.width) / 18))
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) { isZoomed = true }
+                        }
                         .gesture(dragGesture)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -110,18 +149,18 @@ struct SwipeView: View {
 
     @ViewBuilder
     private var swipeLabel: some View {
-        let dx = dragOffset.width
-        let dy = dragOffset.height
+        let distance = (dragOffset.width * dragOffset.width + dragOffset.height * dragOffset.height).squareRoot()
+        let opacity = min(Double(distance) / 110, 1)
 
-        if dx < -40 {
-            badge("删除", color: .red, angle: 12)
-                .opacity(min(Double(-dx) / 110, 1))
-        } else if dx > 40 {
-            badge("保留", color: .green, angle: -12)
-                .opacity(min(Double(dx) / 110, 1))
-        } else if dy < -40 {
-            badge("喜欢 ♥", color: .pink, angle: 0)
-                .opacity(min(Double(-dy) / 110, 1))
+        switch swipeDirection(dragOffset, threshold: 40) {
+        case .delete:
+            badge("删除", color: .red, angle: 12).opacity(opacity)
+        case .keep:
+            badge("保留", color: .green, angle: -12).opacity(opacity)
+        case .like:
+            badge("喜欢 ♥", color: .pink, angle: 0).opacity(opacity)
+        case nil:
+            EmptyView()
         }
     }
 
@@ -140,18 +179,13 @@ struct SwipeView: View {
     private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
-                guard !isFlyingOut else { return }
+                guard !isFlyingOut, !isZoomed else { return }
                 dragOffset = value.translation
             }
             .onEnded { value in
-                guard !isFlyingOut else { return }
-                let t = value.translation
-                if t.width < -swipeThreshold {
-                    perform(.delete)
-                } else if t.width > swipeThreshold {
-                    perform(.keep)
-                } else if t.height < -swipeThreshold {
-                    perform(.like)
+                guard !isFlyingOut, !isZoomed else { return }
+                if let action = swipeDirection(value.translation, threshold: swipeThreshold) {
+                    perform(action)
                 } else {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         dragOffset = .zero
