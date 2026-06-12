@@ -11,15 +11,12 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
-            Tab("首页", systemImage: "rectangle.stack.badge.play") {
-                SwipeView()
-            }
-            Tab("设置", systemImage: "gearshape") {
-                SettingsView()
-            }
-            Tab("我的", systemImage: "person.crop.circle") {
-                ProfileView()
-            }
+            SwipeView()
+                .tabItem { Label("首页", systemImage: "rectangle.stack.badge.play") }
+            SettingsView()
+                .tabItem { Label("设置", systemImage: "gearshape") }
+            ProfileView()
+                .tabItem { Label("我的", systemImage: "person.crop.circle") }
         }
         .environmentObject(library)
         .environmentObject(settings)
