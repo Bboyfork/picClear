@@ -38,9 +38,9 @@ struct SwipeView: View {
         // 屏幕坐标 y 向下：3点=0°，6点=90°，9点=±180°，12点=-90°
         let angle = atan2(t.height, t.width) * 180 / .pi
         switch angle {
-        case -150 ..< -30: return .like    // 10点 ~ 2点
-        case -30 ..< 90: return .keep      // 2点 ~ 6点
-        default: return .delete            // 6点 ~ 10点
+        case -150 ..< -40: return .like    // 上滑区 110°
+        case -40 ..< 90: return .keep      // 右滑区上界上移 10°
+        default: return .delete           // 其余为左滑
         }
     }
 
