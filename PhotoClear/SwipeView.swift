@@ -22,6 +22,10 @@ struct SwipeView: View {
     @State private var dragOffset: CGSize = .zero
     @State private var isFlyingOut = false
     @State private var isZoomed = false
+    @State private var zoomScale: CGFloat = 1
+    @State private var zoomAnchorScale: CGFloat = 1
+    /// 开 = 移动（目标相册 + 移出源相册），关 = 复制（仅加入目标相册）
+    @State private var moveMode = false
     @State private var errorMessage: String?
     @State private var processedCount = (deleted: 0, kept: 0, liked: 0)
 
@@ -59,6 +63,15 @@ struct SwipeView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
+                    Toggle(isOn: $moveMode) {
+                        Text("移动")
+                    }
+                    .toggleStyle(.switch)
+                    #if os(iOS)
+                    .fixedSize()
+                    #endif
+                }
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         reload()
                     } label: {
@@ -88,7 +101,7 @@ struct SwipeView: View {
         }
     }
 
-    /// 全貌查看：单击退出，期间不可滑动
+    /// 全貌查看：捏合可放大并保持；已放大时单击回正常，正常时单击退出
     private var zoomOverlay: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -97,12 +110,33 @@ struct SwipeView: View {
                 targetSize: CGSize(width: 2400, height: 2400),
                 fillMode: false
             )
+            .scaleEffect(zoomScale)
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.2)) { isZoomed = false }
-        }
+        .gesture(magnifyGesture)
+        .onTapGesture { handleZoomTap() }
         .transition(.opacity)
+    }
+
+    private var magnifyGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                zoomScale = min(max(zoomAnchorScale * value.magnification, 1), 6)
+            }
+            .onEnded { _ in
+                zoomAnchorScale = zoomScale
+            }
+    }
+
+    private func handleZoomTap() {
+        if zoomScale > 1.01 {
+            withAnimation(.easeInOut(duration: 0.2)) { zoomScale = 1 }
+            zoomAnchorScale = 1
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) { isZoomed = false }
+            zoomScale = 1
+            zoomAnchorScale = 1
+        }
     }
 
     // MARK: - 卡片堆
@@ -214,14 +248,18 @@ struct SwipeView: View {
                 // 右滑去向：设置了且不是源相册才需要移动
                 let keepTarget = settings.keepAlbumID
                 let needsKeepCopy = !keepTarget.isEmpty && keepTarget != settings.sourceAlbumID
+                // 移动模式下，照片进了目标相册后要移出源相册
+                var movedToTarget = false
 
                 switch action {
                 case .delete:
                     try await library.add(asset, toAlbumID: settings.deleteAlbumID)
+                    movedToTarget = true
                     processedCount.deleted += 1
                 case .keep:
                     if needsKeepCopy {
                         try await library.add(asset, toAlbumID: keepTarget)
+                        movedToTarget = true
                     }
                     processedCount.kept += 1
                 case .like:
@@ -230,7 +268,12 @@ struct SwipeView: View {
                         try await library.add(asset, toAlbumID: keepTarget)
                     }
                     try await library.add(asset, toAlbumID: settings.likeAlbumID)
+                    movedToTarget = true
                     processedCount.liked += 1
+                }
+
+                if moveMode && movedToTarget {
+                    try await library.remove(asset, fromAlbumID: settings.sourceAlbumID)
                 }
                 try? await Task.sleep(for: .milliseconds(300))
                 currentIndex += 1

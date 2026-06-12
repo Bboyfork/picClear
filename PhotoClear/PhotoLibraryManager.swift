@@ -101,6 +101,15 @@ final class PhotoLibraryManager: ObservableObject {
             request?.addAssets([asset] as NSArray)
         }
     }
+
+    /// 把照片移出指定相册；albumID 为空（整个图库）时无操作
+    func remove(_ asset: PHAsset, fromAlbumID albumID: String) async throws {
+        guard let info = album(withID: albumID) else { return }
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCollectionChangeRequest(for: info.collection)
+            request?.removeAssets([asset] as NSArray)
+        }
+    }
 }
 
 enum PhotoClearError: LocalizedError {
