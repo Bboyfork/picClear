@@ -16,6 +16,7 @@ enum SwipeAction {
 struct SwipeView: View {
     @EnvironmentObject var library: PhotoLibraryManager
     @EnvironmentObject var settings: AppSettings
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var assets: [PHAsset] = []
     @State private var currentIndex = 0
@@ -30,6 +31,12 @@ struct SwipeView: View {
     @State private var processedCount = (deleted: 0, kept: 0, liked: 0)
 
     private let swipeThreshold: CGFloat = 110
+
+    /// 是否允许"移动"：必须选了一个仍然存在的源相册。
+    /// 整个图库没有可移除引用的源相册；相册列表没加载好或源相册已被删时也不能移动。
+    private var canMove: Bool {
+        !settings.sourceAlbumID.isEmpty && library.album(withID: settings.sourceAlbumID) != nil
+    }
 
     /// 按"时钟方向"划分滑动区域：10点~2点=上滑喜欢，2点~6点=右滑保留，6点~10点=左滑删除
     private func swipeDirection(_ t: CGSize, threshold: CGFloat) -> SwipeAction? {
@@ -62,15 +69,24 @@ struct SwipeView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
+                // 文字与开关拆成两个独立工具栏项；.hidingGlassBackground() 去掉 26+ 的共享玻璃胶囊
                 ToolbarItem(placement: .primaryAction) {
-                    Toggle(isOn: $moveMode) {
-                        Text("移动")
-                    }
-                    .toggleStyle(.switch)
-                    #if os(iOS)
-                    .fixedSize()
-                    #endif
+                    Text("移动")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
                 }
+                .hidingGlassBackground()
+                ToolbarItem(placement: .primaryAction) {
+                    // 整库时不能移动：开关置灰，且即便之前开着也显示为关
+                    Toggle("移动", isOn: Binding(
+                        get: { moveMode && canMove },
+                        set: { moveMode = $0 }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!canMove)
+                }
+                .hidingGlassBackground()
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         reload()
@@ -78,6 +94,7 @@ struct SwipeView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
+                .hidingGlassBackground()
             }
             .alert("操作失败", isPresented: .init(
                 get: { errorMessage != nil },
@@ -93,6 +110,14 @@ struct SwipeView: View {
         }
         .onChange(of: library.authorizationStatus) {
             if library.isAuthorized { reload() }
+        }
+        .onAppear {
+            // 切回首页时刷新相册列表，让"移动"开关反映源相册的最新状态
+            if library.isAuthorized { library.loadAlbums() }
+        }
+        .onChange(of: scenePhase) {
+            // 从后台切回前台时刷新（相册可能在系统「照片」里被改动过）
+            if scenePhase == .active, library.isAuthorized { library.loadAlbums() }
         }
         .overlay {
             if isZoomed, currentIndex < assets.count {
@@ -144,6 +169,10 @@ struct SwipeView: View {
     private var cardStack: some View {
         VStack(spacing: 20) {
             statsBar
+
+            if !canMove {
+                moveDisabledHint
+            }
 
             GeometryReader { geo in
                 ZStack {
@@ -272,7 +301,7 @@ struct SwipeView: View {
                     processedCount.liked += 1
                 }
 
-                if moveMode && movedToTarget {
+                if moveMode && canMove && movedToTarget {
                     try await library.remove(asset, fromAlbumID: settings.sourceAlbumID)
                 }
                 try? await Task.sleep(for: .milliseconds(300))
@@ -310,6 +339,16 @@ struct SwipeView: View {
         }
         .buttonStyle(.plain)
         .disabled(isFlyingOut)
+    }
+
+    // MARK: - 提示
+
+    /// 整库时移动不可用的说明
+    private var moveDisabledHint: some View {
+        Label("整理整个图库时不能移动，去「设置」选「要处理的相册」即可开启", systemImage: "info.circle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - 统计条
@@ -360,6 +399,8 @@ struct SwipeView: View {
     }
 
     private func reload() {
+        // 先刷新相册，避免源相册没加载好导致误抓整个图库
+        if library.isAuthorized { library.loadAlbums() }
         assets = library.fetchAssets(sourceAlbumID: settings.sourceAlbumID)
         currentIndex = 0
         processedCount = (0, 0, 0)
@@ -393,5 +434,20 @@ struct PermissionView: View {
             }
         }
         .padding()
+    }
+}
+
+// MARK: - 工具栏玻璃背景
+
+private extension ToolbarContent {
+    /// iOS/macOS 26 会给工具栏项套一层共享玻璃胶囊背景，这里去掉它。
+    /// 低于 26 的系统没有这层样式，原样返回。
+    @ToolbarContentBuilder
+    func hidingGlassBackground() -> some ToolbarContent {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            self.sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
     }
 }
